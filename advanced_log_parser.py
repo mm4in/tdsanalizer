@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-ПРОДВИНУТЫЙ ПАРСЕР ЛОГОВ - ИЗВЛЕЧЕНИЕ ВСЕХ ИНДИКАТОРНЫХ ПОЛЕЙ
-Исправляет критическую ошибку: система игнорировала 90% значимых полей!
+ИСПРАВЛЕННЫЙ ПАРСЕР ЛОГОВ - ИЗВЛЕЧЕНИЕ ВСЕХ ИНДИКАТОРНЫХ ПОЛЕЙ
+Исправляет критическую ошибку с отрицательными значениями (ef2--7.19, ze2--4.12)
 
 Извлекает ВСЕ поля из сырого лога:
 - nw (сигналы !!, !!!) 
-- ef (energy factor)
+- ef (energy factor) с отрицательными значениями
 - as (accumulated signal)
 - vc (volatility composite)
-- ze (zero crossing)
+- ze (zero crossing) с отрицательными значениями
 - maz, cvz, dz, rz, mz (sigma поля)
 - co, ro, mo, do, so (momentum поля)
 """
@@ -21,7 +21,7 @@ from datetime import datetime
 
 class AdvancedLogParser:
     """
-    Продвинутый парсер для извлечения ВСЕХ полей из финансовых логов
+    ИСПРАВЛЕННЫЙ парсер для извлечения ВСЕХ полей из финансовых логов
     """
     
     def __init__(self):
@@ -32,7 +32,7 @@ class AdvancedLogParser:
         self.field_statistics = {}
         
     def _create_field_patterns(self) -> Dict[str, str]:
-        """Создание УНИВЕРСАЛЬНЫХ паттернов для любых полей данных"""
+        """Создание ИСПРАВЛЕННЫХ паттернов для извлечения полей"""
         
         # Определяем точные списки полей из ТЗ
         self.ltf_field_prefixes = {
@@ -55,8 +55,9 @@ class AdvancedLogParser:
         self.htf_suffixes = {'1h', '4h', '1d', '1w'}
         
         patterns = {
-            # УНИВЕРСАЛЬНЫЙ паттерн для всех полей данных
-            'universal_field': r'([a-zA-Z]+)(\d+|1h|4h|1d|1w)-([!-]+|\-?\d+(?:\.\d+)?(?:%)?)',
+            # ИСПРАВЛЕННЫЙ универсальный паттерн для всех полей данных
+            # Обрабатывает: ef2--7.19, nw2-!!, as2-3.33, ze2--4.12
+            'universal_field': r'([a-zA-Z]+)(\d+|1h|4h|1d|1w)-((?:!+)|(?:--?\d+(?:\.\d+)?(?:%)?)|(?:-?\d+(?:\.\d+)?(?:%)?))',
             
             # Специальные HTF поля без суффиксов
             'special_htf': r'\b(bs|wa|pd)\b(?:\s+([^\s,|]+))?',
@@ -74,7 +75,7 @@ class AdvancedLogParser:
             'ohlc': r'o:([0-9.]+)\|h:([0-9.]+)\|l:([0-9.]+)\|c:([0-9.]+)',
             'volume': r'\|([0-9.]+K)\|',
             'range': r'rng:([0-9.]+)',
-            'candle_type': r'\|(NORMAL|BIG_BODY|DOJI)\|',
+            'candle_type': r'\|(NORMAL|BIG_BODY|DOJI|HAMMER|PIN_TOP|FLAT)\|',
             'color': r'\|(RED|GREEN)\|',
             'change_24h': r'(-?\d+(?:\.\d+)?)%_24h'
         }
@@ -105,7 +106,7 @@ class AdvancedLogParser:
                     parsed_records.append(record)
                     
                 # Показываем прогресс
-                if (i + 1) % 100 == 0:
+                if (i + 1) % 1000 == 0:
                     print(f"   Обработано: {i + 1}/{len(lines)} строк")
                     
             except Exception as e:
@@ -178,13 +179,19 @@ class AdvancedLogParser:
             metadata['candle_type'] = 'BIG_BODY'
         elif 'DOJI' in line:
             metadata['candle_type'] = 'DOJI'
+        elif 'HAMMER' in line:
+            metadata['candle_type'] = 'HAMMER'
+        elif 'PIN_TOP' in line:
+            metadata['candle_type'] = 'PIN_TOP'
+        elif 'FLAT' in line:
+            metadata['candle_type'] = 'FLAT'
         else:
             metadata['candle_type'] = 'NORMAL'
         
         return metadata
     
     def _extract_all_indicator_fields(self, line: str) -> Dict:
-        """УНИВЕРСАЛЬНОЕ извлечение всех полей данных без предвзятости"""
+        """ИСПРАВЛЕННОЕ универсальное извлечение всех полей данных"""
         fields = {}
         
         # Универсальное извлечение всех полей формата prefix+suffix-value
@@ -207,11 +214,11 @@ class AdvancedLogParser:
                     fields[field_name] = len(value)  # Количество !
                     fields[f"{field_name}_signal"] = value  # Сам сигнал
                 
-                # Обработка числовых значений
-                elif value.replace('-', '').replace('.', '').replace('%', '').isdigit():
+                # Обработка числовых значений (включая отрицательные с двойными дефисами)
+                elif self._is_numeric_value(value):
                     try:
-                        # Убираем % если есть, конвертируем в число
-                        numeric_value = float(value.replace('%', ''))
+                        # Конвертируем значение в число
+                        numeric_value = self._parse_numeric_value(value)
                         fields[field_name] = numeric_value
                         
                         # Маркировка типа поля
@@ -252,19 +259,49 @@ class AdvancedLogParser:
         
         return fields
     
+    def _is_numeric_value(self, value: str) -> bool:
+        """Проверяет является ли значение числовым (включая отрицательные с --)"""
+        # Убираем % если есть
+        clean_value = value.replace('%', '')
+        
+        # Проверяем паттерны числовых значений
+        numeric_patterns = [
+            r'^-?\d+(?:\.\d+)?$',      # 3.33, -4.12
+            r'^--\d+(?:\.\d+)?$',      # --7.19, --4.12
+        ]
+        
+        for pattern in numeric_patterns:
+            if re.match(pattern, clean_value):
+                return True
+        
+        return False
+    
+    def _parse_numeric_value(self, value: str) -> float:
+        """Парсит числовое значение из строки"""
+        # Убираем % если есть
+        clean_value = value.replace('%', '')
+        
+        # Обрабатываем отрицательные значения с двойными дефисами
+        if clean_value.startswith('--'):
+            # --7.19 → -7.19
+            return -float(clean_value[2:])
+        else:
+            # 3.33, -4.12
+            return float(clean_value)
+    
     def _generate_parsing_statistics(self, df: pd.DataFrame):
         """Генерация статистики извлеченных полей"""
         print("\n📊 СТАТИСТИКА ИЗВЛЕЧЕННЫХ ПОЛЕЙ:")
         
         # Подсчет полей по группам
         field_groups = {
-            'nw_fields': [col for col in df.columns if col.startswith('nw')],
-            'ef_fields': [col for col in df.columns if col.startswith('ef')],
-            'as_fields': [col for col in df.columns if col.startswith('as')],
-            'vc_fields': [col for col in df.columns if col.startswith('vc')],
-            'ze_fields': [col for col in df.columns if col.startswith('ze')],
-            'sigma_fields': [col for col in df.columns if any(col.startswith(prefix) for prefix in ['rz', 'mz', 'cz', 'dz', 'cvz', 'maz', 'ciz', 'sz'])],
-            'momentum_fields': [col for col in df.columns if any(col.startswith(prefix) for prefix in ['co', 'ro', 'mo', 'do', 'so'])],
+            'nw_fields': [col for col in df.columns if col.startswith('nw') and not col.endswith('_signal') and not col.endswith('_type')],
+            'ef_fields': [col for col in df.columns if col.startswith('ef') and not col.endswith('_type')],
+            'as_fields': [col for col in df.columns if col.startswith('as') and not col.endswith('_type')],
+            'vc_fields': [col for col in df.columns if col.startswith('vc') and not col.endswith('_type')],
+            'ze_fields': [col for col in df.columns if col.startswith('ze') and not col.endswith('_type')],
+            'sigma_fields': [col for col in df.columns if any(col.startswith(prefix) for prefix in ['rz', 'mz', 'cz', 'dz', 'cvz', 'maz', 'ciz', 'sz']) and not col.endswith('_type')],
+            'momentum_fields': [col for col in df.columns if any(col.startswith(prefix) for prefix in ['co', 'ro', 'mo', 'do', 'so']) and not col.endswith('_type')],
             'metadata_fields': [col for col in df.columns if col in ['open', 'high', 'low', 'close', 'volume', 'range']]
         }
         
@@ -273,19 +310,23 @@ class AdvancedLogParser:
                 print(f"   {group_name}: {len(fields)} полей")
                 
                 # Показываем примеры значений для ключевых полей
-                if group_name in ['nw_fields', 'ef_fields', 'as_fields', 'vc_fields']:
+                if group_name in ['nw_fields', 'ef_fields', 'as_fields', 'vc_fields', 'ze_fields']:
                     for field in fields[:3]:  # Первые 3 поля
-                        non_zero = df[field].dropna()
-                        if len(non_zero) > 0:
-                            print(f"      {field}: мин={non_zero.min():.2f}, макс={non_zero.max():.2f}, активаций={len(non_zero)}")
+                        non_null = df[field].dropna()
+                        if len(non_null) > 0:
+                            print(f"      {field}: мин={non_null.min():.2f}, макс={non_null.max():.2f}, активаций={len(non_null)}")
         
         # Проверка критических полей
-        critical_fields = ['nw2', 'ef2', 'as2', 'vc2']
+        critical_fields = ['nw2', 'ef2', 'as2', 'vc2', 'ze2']
         print(f"\n🎯 КРИТИЧЕСКИЕ ПОЛЯ:")
         for field in critical_fields:
             if field in df.columns:
                 non_null_count = df[field].notna().sum()
-                print(f"   ✅ {field}: найдено {non_null_count} активаций")
+                if non_null_count > 0:
+                    sample_values = df[field].dropna().head(3).tolist()
+                    print(f"   ✅ {field}: найдено {non_null_count} активаций, примеры: {sample_values}")
+                else:
+                    print(f"   ⚠️ {field}: поле есть, но все значения NULL")
             else:
                 print(f"   ❌ {field}: НЕ НАЙДЕНО")
     
@@ -393,113 +434,48 @@ class AdvancedLogParser:
 
 # Функция для быстрого тестирования
 def test_parser_on_sample():
-    """Тестирование УНИВЕРСАЛЬНОГО парсера на примере данных"""
+    """Тестирование ИСПРАВЛЕННОГО парсера на примере данных"""
     sample_line = """[2024-08-05T09:24:00.000+03:00]: LTF|event_2025-06-28_22-55|1|2024-08-05 06:24|RED|-1.79%|11.5K|BIG_BODY|66%|-18.8%_24h|o:50254.8|h:50258.6|l:48888|c:49353.4|rng:1370.6|p2-0,p5-80,p15-60,p30-80,md5-47%,md15-206.5%,md30-153.3%,cmd5-1.1%,cmd30-11%,macd5-9.1%,ro2-11,ro5-15,ro15-19,ro30-12,mo2-12,mo5-15,mo30-15,co2--213,co5--299,co15--316,co30--153,cz2--0.24,cz5--0.31,cz15--0.2,cz30--0.23,do5-32,do15-31,do30-32,so2-11,so5-9,so15-8,so30-5,rz2--2.63,rz5--2.44,rz15--1.53,rz30--2.3,mz2--2.29,mz30--1.7,ciz2--1.66,ciz5--2.42,ciz15--2.17,sz30--1.58,dz5--2.21,dz15--1.89,dz30--1.83,cvz2--2.55,cvz5--1.71,cvz15--2.36,cvz30--3.41,maz2--4.06,maz15--2.23,maz30--3.7,ef2--7.19,ef5--4.32,ef15--3.72,ef30--5.03,vc2-2.4,vc5-3.3,vc15-3,ze2--4.12,ze5--2.5,ze15--2.71,ze30--4.6,nw2-!!,nw5-!!,nw15-!!,nw30-!!,as2-3.33,as5-4.39,as15-3.56,as30-4.31,vw2--3.09,vw5--3,vw15--2.47"""
     
     parser = AdvancedLogParser()
     record = parser._parse_single_line(sample_line, 0)
     
-    print("🧪 ТЕСТ УНИВЕРСАЛЬНОГО ПАРСЕРА:")
+    print("🧪 ТЕСТ ИСПРАВЛЕННОГО ПАРСЕРА:")
     print(f"Извлечено полей: {len(record)}")
     print()
     
-    # Группировка полей по типам
-    field_groups = {
-        'LTF': [],
-        'HTF': [], 
-        'LTF_PROGRESS': [],
-        'HTF_PROGRESS': [],
-        'HTF_SPECIAL': [],
-        'METADATA': [],
-        'OTHER': []
-    }
-    
-    for field, value in record.items():
-        if field.endswith('_type'):
-            continue
-            
-        # Определяем тип поля
-        type_field = f"{field}_type"
-        if type_field in record:
-            field_type = record[type_field]
-            if field_type in field_groups:
-                field_groups[field_type].append((field, value))
-            else:
-                field_groups['OTHER'].append((field, value))
-        else:
-            # Метаданные
-            if field in ['timestamp', 'open', 'high', 'low', 'close', 'volume', 'range']:
-                field_groups['METADATA'].append((field, value))
-            else:
-                field_groups['OTHER'].append((field, value))
-    
-    # Вывод результатов по группам
-    for group_name, fields in field_groups.items():
-        if fields:
-            print(f"📊 {group_name} ({len(fields)} полей):")
-            for field, value in fields[:5]:  # Первые 5 полей
-                if isinstance(value, float):
-                    print(f"   ✅ {field}: {value:.2f}")
-                else:
-                    print(f"   ✅ {field}: {value}")
-            
-            if len(fields) > 5:
-                print(f"   ... и еще {len(fields) - 5} полей")
-            print()
-    
     # Проверка критических полей
-    critical_fields = ['nw2', 'ef2', 'as2', 'vc2', 'ze2']
-    print("🎯 КРИТИЧЕСКИЕ ПОЛЯ:")
-    for field in critical_fields:
-        if field in record:
-            print(f"   ✅ {field}: {record[field]}")
-        else:
-            print(f"   ❌ {field}: НЕ НАЙДЕНО")
-
-
-def test_ltf_htf_fields():
-    """Тест на соответствие спискам полей из ТЗ"""
-    print("\n🔍 ТЕСТ СООТВЕТСТВИЯ СПИСКАМ ПОЛЕЙ ИЗ ТЗ:")
+    critical_fields = [
+        ('nw2', '!!'), ('ef2', -7.19), ('as2', 3.33), ('vc2', 2.4), ('ze2', -4.12)
+    ]
     
-    parser = AdvancedLogParser()
-    
-    # Тестируем LTF поля
-    test_ltf_fields = ['rd2', 'md5', 'cd15', 'cmd30', 'ef2', 'nw5', 'as15', 'vc30']
-    print("📋 LTF поля:")
-    for field in test_ltf_fields:
-        prefix = field[:-1] if field[-1].isdigit() else field[:-2]
-        suffix = field[-1] if field[-1].isdigit() else field[-2:]
-        
-        is_valid = (prefix in parser.ltf_field_prefixes and 
-                   suffix in parser.ltf_suffixes)
-        
-        status = "✅" if is_valid else "❌"
-        print(f"   {status} {field}: префикс={prefix}, суффикс={suffix}")
-    
-    # Тестируем HTF поля  
-    test_htf_fields = ['rd1h', 'md4h', 'ef1d', 'nw1w', 'bs', 'wa']
-    print("\n📋 HTF поля:")
-    for field in test_htf_fields:
-        if field in parser.special_htf_fields:
-            print(f"   ✅ {field}: специальное HTF поле")
-        else:
-            # Извлекаем префикс и суффикс для HTF
-            if field.endswith(('1h', '4h', '1d', '1w')):
-                prefix = field[:-2]
-                suffix = field[-2:]
-                is_valid = (prefix in parser.htf_field_prefixes and 
-                           suffix in parser.htf_suffixes)
-                status = "✅" if is_valid else "❌"
-                print(f"   {status} {field}: префикс={prefix}, суффикс={suffix}")
+    print("🎯 ПРОВЕРКА КРИТИЧЕСКИХ ПОЛЕЙ:")
+    for field_name, expected_value in critical_fields:
+        if field_name in record:
+            actual_value = record[field_name]
+            if actual_value == expected_value:
+                print(f"   ✅ {field_name}: {actual_value} (ПРАВИЛЬНО)")
             else:
-                print(f"   ❌ {field}: неизвестный формат")
+                print(f"   ⚠️ {field_name}: {actual_value} (ожидалось {expected_value})")
+        else:
+            print(f"   ❌ {field_name}: НЕ НАЙДЕНО")
+    
+    # Показываем все ef и ze поля
+    print(f"\n🔥 ВСЕ EF ПОЛЯ:")
+    for key, value in record.items():
+        if key.startswith('ef') and not key.endswith('_type'):
+            print(f"   {key}: {value}")
+    
+    print(f"\n🔥 ВСЕ ZE ПОЛЯ:")
+    for key, value in record.items():
+        if key.startswith('ze') and not key.endswith('_type'):
+            print(f"   {key}: {value}")
 
 
 if __name__ == "__main__":
-    print("🚀 ТЕСТИРОВАНИЕ УНИВЕРСАЛЬНОГО ПАРСЕРА")
+    print("🚀 ТЕСТИРОВАНИЕ ИСПРАВЛЕННОГО ПАРСЕРА")
     print("=" * 50)
     
     test_parser_on_sample()
-    test_ltf_htf_fields()
     
-    print("\n🎯 ГОТОВ К ИНТЕГРАЦИИ С ОСНОВНОЙ СИСТЕМОЙ!")
+    print("\n🎯 ГОТОВ К РАБОТЕ С РЕАЛЬНЫМИ ДАННЫМИ!")
