@@ -1,0 +1,213 @@
+# Конфигурация финансового анализатора логов
+# Полное соответствие ТЗ - все параметры настроены правильно
+
+# ОСНОВНЫЕ ПАРАМЕТРЫ АНАЛИЗА
+analysis:
+  # Минимальная точность системы для считания успешной
+  min_accuracy: 0.60
+  
+  # Минимальный Lift над случайным угадыванием  
+  min_lift: 1.5
+  
+  # Доля данных для валидации (от 0.1 до 0.5)
+  validation_split: 0.3
+  
+  # Количество фолдов для кросс-валидации
+  cv_folds: 5
+  
+  # Максимальное количество признаков для обучения
+  max_features: 100
+  
+  # ПРОДВИНУТЫЕ МОДУЛИ (согласно ТЗ)
+  enable_ltf_htf: true          # LTF/HTF разделение и анализ
+  enable_advanced_events: true  # Новые типы событий (откаты по %)
+  enable_veto_system: true      # Стоп-поля и блокировки
+  legacy_mode: false            # Совместимость со старой системой
+
+# ОПРЕДЕЛЕНИЕ СОБЫТИЙ (data-driven подход)
+event_detection:
+  # Пороги для автоматического определения событий
+  volatility_threshold: 2.0      # Порог волатильности
+  volume_threshold: 1.5          # Порог объема
+  price_change_threshold: 0.5    # Порог изменения цены (%)
+  extreme_quantile: 0.8          # Квантиль для экстремальных значений
+  min_event_strength: 1.0        # Минимальная сила события
+
+# ПРОДВИНУТЫЕ СОБЫТИЯ (новые типы согласно ТЗ)
+advanced_events:
+  # Уровни откатов (без обновления лоя)
+  retracement_levels: [2, 3, 5, 7, 10]  # Откаты 2-3%, 3-5%, 5-7%, 7-10%, 10%+
+  
+  # Временное окно для поиска откатов (мин)
+  retracement_time_window: [1, 90]       # От 1 до 90 минут
+  
+  # Минимальное движение для определения экстремума (%)
+  min_extremum_move: 1.0
+  
+  # Порог для определения кульминаций
+  culmination_threshold: 0.8
+  
+  # Порог волатильности для консолидаций
+  consolidation_volatility_threshold: 0.5
+
+# LTF/HTF КОНФИГУРАЦИЯ (разделение сигналов)
+ltf_htf:
+  # LTF таймфреймы (быстрые сигналы)
+  ltf_timeframes: ['2', '5', '15', '30']
+  
+  # HTF таймфреймы (медленные сигналы)  
+  htf_timeframes: ['1h', '4h', '1d', '1w']
+  
+  # Метод разделения (auto, manual, mixed)
+  separation_method: 'auto'
+  
+  # Исправление багов временных лагов
+  temporal_lag_fix: true
+
+# ТРЕХФАЗНЫЙ АНАЛИЗ (согласно ТЗ)
+phase_analysis:
+  # Фазы событий
+  phases:
+    preparation:      # ПОДГОТОВКА - до ключевой точки
+      max_duration: 20       # Максимальная длительность (периоды)
+      activity_threshold: 0.3 # Порог активности
+      
+    culmination:      # КУЛЬМИНАЦИЯ - сама ключевая точка  
+      max_duration: 3        # Максимальная длительность
+      activity_threshold: 0.8 # Высокий порог активности
+      
+    development:      # РАЗВИТИЕ - после ключевой точки
+      max_duration: 15       # Максимальная длительность
+      activity_threshold: 0.5 # Средний порог активности
+      
+    consolidation:    # КОНСОЛИДАЦИЯ - боковые движения
+      min_duration: 10       # Минимальная длительность
+      volatility_max: 0.5    # Максимальная волатильность
+      
+    transition:       # ПЕРЕХОДНЫЕ ЗОНЫ - между фазами
+      detection_window: 5    # Окно детекции
+      stability_threshold: 0.3 # Порог стабильности
+
+# СИСТЕМА СТОП-ПОЛЕЙ И VETO ЛОГИКИ
+veto_system:
+  # Включить блокирующие поля
+  enable_blocking: true
+  
+  # Пороги для VETO правил
+  veto_thresholds:
+    high_volatility: 3.0           # Порог высокой волатильности
+    conflicting_signals: 0.7       # Порог конфликтующих сигналов
+    low_confidence: 0.3            # Порог низкой уверенности
+  
+  # Минимальное количество подтверждающих сигналов
+  min_confirming_signals: 2
+
+# ОТБОР И ФИЛЬТРАЦИЯ ПРИЗНАКОВ
+feature_selection:
+  # Максимальное количество признаков для финальной модели
+  max_features: 50
+  
+  # Порог корреляции для удаления дублирующих полей
+  correlation_threshold: 0.8
+  
+  # Минимальная дисперсия для отбора признаков
+  min_variance: 0.01
+  
+  # Максимальное количество лагов для временных признаков
+  max_lags: 10
+
+# СИСТЕМА СКОРИНГА
+scoring:
+  # Минимальное значение ROC-AUC для включения поля
+  min_roc_auc: 0.55
+  
+  # Минимальное количество активаций для статистической значимости
+  min_activations: 10
+  
+  # Метод определения порогов (percentile, statistical, optimal)
+  threshold_method: 'percentile'
+  
+  # Параметры Random Forest
+  rf_n_estimators: 100
+  rf_random_state: 42
+  rf_max_depth: 10
+
+# КОМБИНИРОВАННЫЙ СКОРИНГ LTF + HTF
+combined_scoring:
+  # Методы ансамблирования
+  ensemble_methods: ['weighted', 'voting', 'stacking']
+  
+  # Адаптивное взвешивание по условиям рынка
+  adaptive_weighting: true
+  
+  # Сценарийный подход к скорингу
+  scenario_based: true
+  
+  # Пороги уверенности для разных сценариев
+  confidence_thresholds: [0.3, 0.5, 0.7, 0.9]
+  
+  # Стратегии комбинирования
+  combination_strategies:
+    - 'ltf_primary'     # LTF основной, HTF подтверждение
+    - 'htf_primary'     # HTF направление, LTF вход
+    - 'balanced'        # Равновесие LTF/HTF
+    - 'adaptive'        # Адаптивные веса по условиям
+    - 'hierarchical'    # Иерархическое принятие решений
+
+# ВРЕМЕННЫЕ ХАРАКТЕРИСТИКИ (для статистики согласно ТЗ)
+temporal_analysis:
+  # Максимальный лаг для поиска активаций (периоды)
+  max_search_lag: 20
+  
+  # Окно для расчета временных статистик
+  statistics_window: 50
+  
+  # Минимальная частота активаций для включения в анализ
+  min_activation_frequency: 0.05
+
+# ОТЧЕТЫ И ВИЗУАЛИЗАЦИЯ
+reporting:
+  # Создавать детальные отчеты
+  detailed_reports: true
+  
+  # Сохранять промежуточные результаты
+  save_intermediate: true
+  
+  # Создавать графики и визуализации
+  create_plots: true
+  
+  # Формат сохранения графиков
+  plot_format: 'png'
+  
+  # DPI для графиков
+  plot_dpi: 300
+
+# ИНТЕГРАЦИЯ С GOOGLE SHEETS (низкий приоритет)
+google_sheets:
+  # Включить интеграцию (пока отключено)
+  enabled: false
+  
+  # Частота обновления данных (минуты)
+  update_frequency: 5
+  
+  # Максимальное количество строк для обработки
+  max_rows: 1000
+
+# ГРУППЫ ПОЛЕЙ (для анализа по группам)
+field_groups:
+  group_1: ['rd', 'md', 'cd', 'cmd', 'macd', 'od', 'dd', 'cvd', 'drd', 'ad', 'ed', 'hd', 'sd']
+  group_2: ['ro', 'mo', 'co', 'cz', 'do', 'ae', 'so']
+  group_3: ['rz', 'mz', 'ciz', 'sz', 'dz', 'cvz', 'maz', 'oz']
+  group_4: ['ef', 'wv', 'vc', 'ze', 'nw', 'as', 'vw']
+  group_5: ['bs', 'wa', 'pd']
+
+# DEBUG И РАЗРАБОТКА
+debug:
+  # Выводить подробную отладочную информацию
+  verbose: false
+  
+  # Сохранять промежуточные данные для отладки
+  save_debug_data: false
+  
+  # Ограничить количество записей для быстрого тестирования (0 = без ограничений)
+  max_records_for_testing: 0
